@@ -126,3 +126,11 @@ assert | assert the truth value of statements | assert(registers[5].busy == fals
         Register contents
 
     Use logging or CSV output to trace instruction flow and detect bugs
+
+
+## Points to keep in mind
+
+1. Issue is time of check of availability 
+2. Start is the time when exactly start
+3. curr_time_stamp is exactly when the resources become free
+4. any time that is denoted here is the exact time of availability
