@@ -3,24 +3,24 @@
 #include <sstream>
 #include <vector>
 #include <cassert>
+#include <bitset>
+#include <cstdint>
+#include <cstring>
+#include <queue>
 
 using namespace std;
 
+enum EventType {ISSUE, START, COMPLETE, WRITEBACK};
+
+/**
+ * @brief Convinience for registering the values
+ * 
+ * @param f32 use if fp32
+ * @param f64 use if fp64
+ * @param is_64bit true if in fp64 else false
+ * @warning Intialise before use
+ */
 struct FPRegister {
-
-    /*
-        Args:
-            - f32: use if fp32
-            - f64: use if fp64
-            - is_64bit: true if in fp64 else false
-            - busy: true if current in use by the DES Engine
-
-        Reason:
-            Convinience for registering the values
-
-        Caution:
-            Intialise before use
-    */
 
     union {
         float f32;
@@ -32,24 +32,18 @@ struct FPRegister {
 
 FPRegister reg_file[32];
 
-
+/**
+ * @brief Encapsulates information in an instruction
+ * 
+ * @param arrival_cycle time of arrival of instr
+ * @param op opcode of the instr
+ * @param is_double operations double or single
+ * @param dst destination register int
+ * @param src1, src2 sources of register int
+ * @param id identification of the instruction
+ * @warning Initialize before use
+ */
 struct Instruction {
-
-    /*
-        Args:
-            - arrival_cycle: time of arrival of instr
-            - op: opcode of the instr
-            - is_double: operations double or single
-            - dst: destination register int
-            - src1, src2: sources of register int
-            - id: identification of the instruction
-
-        Reason:
-            Encapsulates information in an instruction
-
-        Caution:
-            Initialize before use
-    */
 
     int arrival_cycle;
     string op;
@@ -58,50 +52,54 @@ struct Instruction {
     int id;
 };
 
-struct Output {
-    
-    /*
-        Args:
-            index - ID of the instr
-            instr - exact RISC style syntax
-            issue - clock cycle at which issued
-            start - clock cycle at which processing by the DES Eng
-            complete - clock cycle at which processing complete by DES Eng
-            writeback - clock cycle when result written back
-            result - (double) result value // NOTE: must be converted to .6f whenever needed
-                    storing in higher precision is no harm can be converted to lower
-        
-        Reason:
-            Encapsulates every information contained in the output
-
-        Caution:
-            Intialize before use
-    */
+/**
+ * @brief Encapsulates every information contained in the Event
+ * 
+ * @param index ID of the instr
+ * @param instr exact RISC style syntax
+ * @param issue clock cycle at which issued
+ * @param start clock cycle at which processing by the DES Eng
+ * @param complete clock cycle at which processing complete by DES Eng
+ * @param writeback clock cycle when result written back
+ * @param result result value 
+ * 
+ * NOTE: result must be converted to .6f whenever needed storing in higher precision is no harm can be converted to lower
+ * @warning Intialize before use
+ */
+struct Event {
     
     int index;
-    string instr;
+    Instruction instr;
     int issue;
     int start;
+    EventType type;
     int complete;
     int writeback;
     double result;
 };
 
+/**
+ * @brief parses input file and converts them Instruction format
+ * 
+ * parses the input file and indentifies:
+ * 
+ *  arrival_cycle: (int) cycle of arrival of instr
+ * 
+ *  op: (string) opcode of the instr
+ * 
+ *  is_double: (bool) operations double or single
+ * 
+ *  dst: (int) destination register int
+ * 
+ *  src1, src2: (int, int) sources of register int
+ * 
+ *  id: (int) identification of the instruction, internally maintained by the code no user interference
+ * 
+ * @param filename string name of the file to be parsed
+ * @return list of instructions
+ * @throw if any of the conversion to get ints is invalid
+ */
 vector<Instruction> parse_input_file(string filename) {
-    /*
-        Reason:
-            parses the input file and indentifies:
-            - arrival_cycle: (int) cycle of arrival of instr
-            - op: (string) opcode of the instr
-            - is_double: (bool) operations double or single
-            - dst: (int) destination register int
-            - src1, src2: (int, int) sources of register int
-            - id: (int) identification of the instruction, internally maintained by the
-            code no user interference
-
-        Caution:
-            If any info type is incorrect then typecasted implicitly
-    */
     ifstream infile(filename);
     vector<Instruction> instructions;
     string line;
@@ -137,51 +135,98 @@ vector<Instruction> parse_input_file(string filename) {
 
 }
 
-void DESEngine(Instruction instr) {
-    /*
-        The engine that identifies all the components
-        executes the information
-        and stores them in a vector Output format
-        
-        Here the actual pipelining shall be happening
-    */
+/**
+ * @brief Engine running the pipeling
+ * 
+ * @param instrs all the instructions to pipeline
+ * @return None
+ * @warning TODO
+ */
+void DESEngine(vector<Instruction> instrs) {
+    int clock_ticks = instrs.size();
 
-}
+    queue<Event> events;
+    int clock_tick = 0;
+    while (events.size() != 0) {
 
+    }
+}   
+
+/**
+ * @brief converts bin string to fp32
+ * 
+ * @param bin string of 0's and 1's
+ * @return double value interpreted from the bin
+ * @throw length of bin must be 32, else exit
+ */
 float bin32_to_float32(string bin) {
-    /*
-    Args:
-        bin: (string) sign (1) + exp (7) + mantisa (24)
+    if (bin.size()!=32) {
+        throw std::invalid_argument("Binary string must be 32 bits");
+    }
 
-    Caution:
-        string will be checked for 32 length, if not abort
-    */
+    bitset<32> bits(bin);
+    uint32_t intval = bits.to_ulong();
+    float result;
+    std::memcpy(&result, &intval, sizeof(result));
 
-    assert(bin.size()==32);
-    float sign = 1.0 ? bin[0]==0 : -1.0;
+    return result;
+}
+
+/**
+ * @brief converts bin string to fp64
+ * 
+ * @param bin string of 0's and 1's
+ * @return double value interpreted from the bin
+ * @throw length of bin must be 64, else exit
+ */
+double bin_to_float64(string bin) {
     
+    if (bin.size() != 64) {
+        throw std::invalid_argument("Binary string must be 64 bits");
+    }
+
+    std::bitset<64> bits(bin);
+    uint64_t intVal = bits.to_ullong();
+    double result;
+    std::memcpy(&result, &intVal, sizeof(result));
+    return result;
 }
 
-void to_json(Output out, string filename) {
-    /*
-        general purpose json saver
-    */
+/**
+ * @brief generla purpose json saver
+ * 
+ * @param out Event file type
+ * @param filename string of the file name
+ * @return None
+ * @throw unable to open files
+ */
+void to_json(Event out, string filename) {
+
 }
 
-void to_csv(Output out, string filename) {
+/**
+ * @brief general purpose csv saver
+ * 
+ * @param out Event storage list
+ * @param filename string of the file name
+ * @throw unable to open file
+ */
+void to_csv(Event out, string filename) {
     /*
         general purpose csv saver
     */
 }
 
+/**
+ * @brief Executes the main content
+ * 
+ * Flow 
+ *  - identifies files
+ *  - pass the input to DES Engine
+ *  - save them to json as per requirement
+ */
 int main(int argc, char* argv[]) {
-    /*
-        Executes the main content
-        Flow:
-            - indentify files
-            - pass the input to DES Engine 
-            - save them csv or json as per requiement
-    */
+    
     if (argc != 3) {
         cerr << "Usage: ./fp_simulator <input_trace> <output_csv>\n";
         return 1;
