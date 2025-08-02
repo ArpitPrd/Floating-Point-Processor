@@ -2,6 +2,7 @@
     "files.associations": {
         "stdexcept": "cpp",
         "tuple": "cpp",
-        "fstream": "cpp"
+        "fstream": "cpp",
+        "limits": "cpp"
     }
 }

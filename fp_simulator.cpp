@@ -12,10 +12,18 @@
 #include <set>
 #include <limits>
 #include <filesystem>
+#include <cmath>
 
 using namespace std;
 
-
+/**
+ * @brief 4 types of cycles to record for each instruction
+ * 
+ * ISSUE: cycle when the instruction enters the pipeline, if same arrival cycle conflict resolved at random
+ * START: cycle when execution of instruction starts in the ALU
+ * COMPLETE: cycle when the execution of instruction completes in the ALU
+ * WRITEBACK: when result can be written back into the dst register
+ */
 enum EventType {ISSUE, START, COMPLETE, WRITEBACK};
 
 /**
@@ -32,6 +40,14 @@ struct FPRegister {
     int free_at;  // time upto which busy
 };
 
+/**
+ * @brief Encapsulates the information of a functional unit
+ * 
+ * @param free_at the clock cycle from which the functional unit is available for use
+ * @param latency the number of clock cycles required to complete the exectution in the functional unit
+ * 
+ * @note params initial value is zero
+ */
 struct FunctionalUnit {
     int free_at;
     int latency;
@@ -56,7 +72,6 @@ struct FunctionalUnit {
  * @param is_double operations double or single
  * @param dst destination register int
  * @param src1, src2 sources of register int
- * @param id identification of the instruction
  * @warning Initialize before use
  */
 struct Instruction {
@@ -65,13 +80,12 @@ struct Instruction {
     string op;
     bool is_double;
     int dst, src1, src2;
-    int id;
 };
 
 /**
  * @brief Encapsulates every information contained in the Event
  * 
- * @param index ID of the instr
+ * @param index index when entered of the instr
  * @param type stage of pipeline
  * @param instr exact RISC style syntax
  * @param issue clock cycle at which issued
@@ -97,7 +111,6 @@ struct Event {
     double result;
 
     Event(
-        int index,
         EventType type, 
         Instruction instr,
         int issue,
@@ -107,7 +120,6 @@ struct Event {
         int curr_time,
         double result
     ) {
-        this-> index = index;
         this->type = type;
         this->instr = instr;
         this->issue = issue;
@@ -119,6 +131,13 @@ struct Event {
     }
 };
 
+/**
+ * @brief comparator for Events wrt to the following priority
+ * 
+ * 1. Current Time of the Event;
+ * 2. Arrival Cycle of the Event;
+ * 3. Index of the Event (chosen at random as the last resort);
+ */
 struct EventCompArrCycle {
     bool operator()(const Event &e1, const Event &e2) {
         if (e1.curr_time > e2.curr_time) {
@@ -130,16 +149,14 @@ struct EventCompArrCycle {
         if (e1.instr.arrival_cycle > e2.instr.arrival_cycle) {
             return true;
         }
-        else if (e1.instr.arrival_cycle < e2.instr.arrival_cycle) {
-            return false;
-        }
-        else if (e1.index > e2.index) {
-            return true;
-        }
+        
         return false;
     }
 };
 
+/**
+ * @brief comparator by index for the sake of result production
+ */
 struct CompEventByIndex {
     bool operator()(const Event &e1, const Event &e2) {
         return e1.index > e2.index;
@@ -147,14 +164,22 @@ struct CompEventByIndex {
 };
 
 
-/*
-    Logging Defs
-*/
+/**
+ * @brief maps ops to their information encapsulated in functional units
+ */
 map<string, FunctionalUnit> functional_units;
+/**
+ * @brief All 32 register files information encapsulated in FPRegister
+ */
 FPRegister reg_file[32];
+/**
+ * @brief used for final production of schedule according to index which is very well in acco
+ */
 priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index;
+/**
+ * @brief time after which pipeline stage is available
+ */
 map<EventType, int> pipeline_use_after;
-
 
 /**
  * @brief parses input file and converts them Instruction format
@@ -171,7 +196,6 @@ map<EventType, int> pipeline_use_after;
  * 
  *  src1, src2: (int, int) sources of register int
  * 
- *  id: (int) identification of the instruction, internally maintained by the code no user interference
  * 
  * @param filename string name of the file to be parsed
  * @return list of instructions
@@ -184,7 +208,6 @@ vector<Instruction> parse_input_file(string filename) {
     ifstream infile(filename);
     vector<Instruction> instructions;
     string line;
-    int inst_id = 0;
 
     while (getline(infile, line)) {
         if (line.empty()) continue;
@@ -197,7 +220,6 @@ vector<Instruction> parse_input_file(string filename) {
 
         Instruction instr;
         instr.arrival_cycle = cycle;
-        instr.id = inst_id++;
 
         // Split opcode and precision suffix
         size_t dot_pos = opcode_full.find('.');
@@ -228,11 +250,27 @@ vector<Instruction> parse_input_file(string filename) {
  * @warning TODO
  */
 
+void label_index(priority_queue<Event, vector<Event>, EventCompArrCycle> &events_pq) {
+    vector<Event> events_vector;
+
+    int ind = 0;
+    while (!events_pq.empty()) {
+        Event event = events_pq.top();
+        events_pq.pop();
+        event.index = ind++;
+        events_vector.push_back(event);
+    }
+
+    for (long unsigned int i=0; i<events_vector.size(); i++) {
+        events_pq.push(events_vector[i]);
+    }
+
+    return;
+}
 
 priority_queue<Event, vector<Event>, EventCompArrCycle> prepare_pq_from_instrs(vector<Instruction> instrs) {
     priority_queue<Event, vector<Event>, EventCompArrCycle> event_pq;
     for (auto instr : instrs) {
-        // int index;
         // EventType type;
         // Instruction instr;
         // int issue;
@@ -242,7 +280,6 @@ priority_queue<Event, vector<Event>, EventCompArrCycle> prepare_pq_from_instrs(v
         // int curr_time;
         // double result;
         Event e = {
-            instr.id,
             ISSUE,
             instr,
             instr.arrival_cycle,
@@ -256,6 +293,10 @@ priority_queue<Event, vector<Event>, EventCompArrCycle> prepare_pq_from_instrs(v
     }
 
     return event_pq;
+}
+
+bool check_val_nan(double f) {
+    return isnan(f);
 }
 
 bool is_reg_available(int reg_num, int curr_time) {
@@ -284,15 +325,15 @@ bool is_fu_available(string op, int curr_time) {
     return functional_units[op].free_at <= curr_time;
 }
 
-bool is_all_resource_available(vector<int> regs, EventType stage, int curr_time, string op) {
-    if (is_reg_available_list(regs, curr_time) && is_pipeline_available(stage, curr_time) && is_fu_available(op, curr_time)) {
+bool is_all_resource_available(vector<int> regs, int curr_time, string op) {
+    if (is_reg_available_list(regs, curr_time) && is_fu_available(op, curr_time)) {
         return true;
     }
     return false;
 }
 
-int next_available_cycle(vector<int> regs, EventType stage, string op){
-    int time = max(pipeline_use_after[stage], functional_units[op].free_at);
+int next_available_cycle(vector<int> regs, string op){
+    int time = functional_units[op].free_at;
     for (int reg:regs) {
         time = max(reg_file[reg].free_at, time);
     }
@@ -340,7 +381,7 @@ double compute_result(Instruction &instr) {
 }
 
 
-void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompArrCycle> &pending_events) {
+bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompArrCycle> &pending_events) {
     int o1 = event.instr.src1, o2 = event.instr.src2, res = event.instr.dst;
     Instruction instr = event.instr;
     string op = instr.op;
@@ -363,7 +404,7 @@ void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
         break;
     
     case START:
-        if (is_all_resource_available({o1, o2, res}, type, time, op)) {
+        if (is_all_resource_available({o1, o2, res}, time, op)) {
             event.start = time;
             int op_latency = functional_units[op].latency;
             int upd_time = time + op_latency;
@@ -382,15 +423,17 @@ void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
 
             // compute in between start and complete
             event.result = compute_result(instr);
+            
             reg_file[res].f = event.result;
 
             event.type = COMPLETE;
             event.complete = upd_time - 1;
 
             event.type=WRITEBACK;
+            
         }
         else {
-            event.curr_time = next_available_cycle({o1, o2, res}, type, op);
+            event.curr_time = next_available_cycle({o1, o2, res}, op);
         }
         pending_events.push(event);
         break;
@@ -403,6 +446,9 @@ void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
             pipeline_use_after[type] = time+1;
             // event flushed out after writeback
             events_by_index.push(event);
+            if (check_val_nan(event.result)) {
+                return true;
+            }
         }
         else {
             event.curr_time = pipeline_use_after[type];
@@ -413,11 +459,14 @@ void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
     default:
         break;
     }
+    return false;
 }
+
+
 
 bool check_nan(FPRegister reg_file[32]) {
     for (int i=0; i<32; i++){
-        if (reg_file[i].f==std::numeric_limits<double>::quiet_NaN()) {
+        if (check_val_nan(reg_file[i].f)) {
             return true;
         }
         
@@ -434,13 +483,12 @@ bool check_nan(FPRegister reg_file[32]) {
 void DESEngine(priority_queue<Event, vector<Event>, EventCompArrCycle> pending_events) {
     
     while (pending_events.size() != 0) {
-        if (check_nan(reg_file)) {
-            break;
-        }
         Event event = pending_events.top();
         pending_events.pop();
-        process_event(event, pending_events);
+        bool enc_nan = process_event(event, pending_events);
+        if (enc_nan) break;
     }
+    return;
 }   
 
 /**
@@ -526,7 +574,13 @@ void to_csv(vector<tuple<int,string,int,int,int,int,double>> entries, string fil
 }
 
 string gen_instr_string(string op, int res, int o1, int o2) {
-    return op + " " + "R" + to_string(res) + " " + "R" + to_string(o1) + " " + "R" + to_string(o2);
+    string dst = " R" + to_string(res);
+    string op1 = " R" + to_string(o1);
+    string op2 = "";
+    if (o2 != -1) {
+        op2 = " R" + to_string(o2);
+    }
+    return op + dst + op1 + op2;
 }
 
 vector<tuple<int,string,int,int,int,int,double>> organize_info(priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index) {
@@ -587,9 +641,9 @@ int main(int argc, char* argv[]) {
     };
 
     for (int i=0; i<32; i++) {
-        reg_file[i].f = 0.0;
+        reg_file[i].f = 3.146762983;
         reg_file[i].free_at = 0;
-        reg_file[i].is_64bit = false;
+        reg_file[i].is_64bit = true;
     }
 
     pipeline_use_after[ISSUE]=0;
@@ -601,6 +655,9 @@ int main(int argc, char* argv[]) {
     // TODO: Run simulation
     priority_queue<Event, vector<Event>, EventCompArrCycle> pending_events = prepare_pq_from_instrs(instructions);
     
+    // apply indexing
+    label_index(pending_events);
+
     DESEngine(pending_events);
     // TODO: Write results to output_csv
     vector<tuple<int,string,int,int,int,int,double>> organized_info =  organize_info(events_by_index);

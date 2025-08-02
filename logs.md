@@ -22,3 +22,4 @@
 
 - refractor the code to keep all the data values in fp64 and scale down as per requirement
 - run the code once at least to see some basic results
+- make updates to the fact the index may not correspond to the arrival times
