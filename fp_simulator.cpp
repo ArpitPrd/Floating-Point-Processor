@@ -21,17 +21,13 @@ enum EventType {ISSUE, START, COMPLETE, WRITEBACK};
 /**
  * @brief Convinience for registering the values
  * 
- * @param f32 use if fp32
- * @param f64 use if fp64
+ * @param f stores always in double
  * @param is_64bit true if in fp64 else false
  * @warning Intialise before use
  */
 struct FPRegister {
 
-    union {
-        float f32;
-        double f64;
-    };
+    double f;
     bool is_64bit;   // true if f64, false if f32
     int free_at;  // time upto which busy
 };
@@ -40,7 +36,15 @@ struct FunctionalUnit {
     int free_at;
     int latency;
 
-    FunctionalUnit(bool ibusy, int ifreed_time_stamp, int ilatency) : free_at(ifreed_time_stamp), latency(ilatency) {}
+    FunctionalUnit() {
+        free_at=0;
+        latency=0;
+    }
+
+    FunctionalUnit(int _free_at, int _latency)  {
+        free_at=_free_at; 
+        latency=_latency;
+    }
 
 };
 
@@ -68,11 +72,13 @@ struct Instruction {
  * @brief Encapsulates every information contained in the Event
  * 
  * @param index ID of the instr
+ * @param type stage of pipeline
  * @param instr exact RISC style syntax
  * @param issue clock cycle at which issued
  * @param start clock cycle at which processing by the DES Eng
  * @param complete clock cycle at which processing complete by DES Eng
  * @param writeback clock cycle when result written back
+ * @param curr_time current time
  * @param result result value 
  * 
  * NOTE: result must be converted to .6f whenever needed storing in higher precision is no harm can be converted to lower
@@ -93,6 +99,7 @@ struct Event {
     Event(
         int index,
         EventType type, 
+        Instruction instr,
         int issue,
         int start,
         int complete,
@@ -102,6 +109,7 @@ struct Event {
     ) {
         this-> index = index;
         this->type = type;
+        this->instr = instr;
         this->issue = issue;
         this->start = start;
         this->complete = complete;
@@ -119,13 +127,14 @@ struct EventCompArrCycle {
         else if (e1.curr_time < e2.curr_time) {
             return false;
         }
-        else {
-            if (e1.instr.arrival_cycle < e2.instr.arrival_cycle) {
-                return true;
-            }
-            else {
-                return false;
-            }
+        if (e1.instr.arrival_cycle > e2.instr.arrival_cycle) {
+            return true;
+        }
+        else if (e1.instr.arrival_cycle < e2.instr.arrival_cycle) {
+            return false;
+        }
+        else if (e1.index > e2.index) {
+            return true;
         }
         return false;
     }
@@ -195,13 +204,14 @@ vector<Instruction> parse_input_file(string filename) {
         if (dot_pos >= opcode_full.size()) {
             throw runtime_error("invalid opcode");
         }
-        instr.op = opcode_full.substr(0, dot_pos);
+        instr.op = opcode_full;
         instr.is_double = (opcode_full.substr(dot_pos + 1) == "D");
 
         // Parse registers: strip 'R' and convert to int
         instr.dst = stoi(rd.substr(1));
         instr.src1 = stoi(rs1.substr(1));
-        instr.src2 = stoi(rs2.substr(1));
+        if (instr.op != "FMOV.S" && instr.op != "FMOV.D") instr.src2 = stoi(rs2.substr(1));
+        else instr.src2 = -1;
 
         instructions.push_back(instr);
     }
@@ -234,7 +244,8 @@ priority_queue<Event, vector<Event>, EventCompArrCycle> prepare_pq_from_instrs(v
         Event e = {
             instr.id,
             ISSUE,
-            instr.id,
+            instr,
+            instr.arrival_cycle,
             instr.arrival_cycle,
             instr.arrival_cycle,
             instr.arrival_cycle,
@@ -269,18 +280,23 @@ bool is_reg_available_list(vector<int> regs, int curr_time) {
     return avail;
 }
 
-bool is_all_resource_available(vector<int> regs, EventType stage, int curr_time) {
-    if (is_reg_available_list(regs, curr_time) && is_pipeline_available(stage, curr_time)) {
+bool is_fu_available(string op, int curr_time) {
+    return functional_units[op].free_at <= curr_time;
+}
+
+bool is_all_resource_available(vector<int> regs, EventType stage, int curr_time, string op) {
+    if (is_reg_available_list(regs, curr_time) && is_pipeline_available(stage, curr_time) && is_fu_available(op, curr_time)) {
         return true;
     }
     return false;
 }
 
-int next_available_cycle(vector<int> regs, EventType stage){
-    int time = pipeline_use_after[stage];
+int next_available_cycle(vector<int> regs, EventType stage, string op){
+    int time = max(pipeline_use_after[stage], functional_units[op].free_at);
     for (int reg:regs) {
         time = max(reg_file[reg].free_at, time);
     }
+    return time;
 }
 
 /**
@@ -299,13 +315,8 @@ double compute_result(Instruction &instr) {
     double val1, val2, res;
     
     // Determine operand values based on bit width
-    if (instr.is_double) {
-        val1 = reg_file[instr.src1].f64;
-        if (instr.src2 != NULL) val2 = reg_file[instr.src2].f64;
-    } else {
-        val1 = static_cast<double>(reg_file[instr.src1].f32);
-        if (instr.src2 != NULL) val2 = static_cast<double>(reg_file[instr.src2].f32);
-    }
+    val1 = reg_file[instr.src1].f;
+    if (instr.src2 != -1) val2 = reg_file[instr.src2].f;
 
     
     
@@ -331,45 +342,47 @@ double compute_result(Instruction &instr) {
 
 void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompArrCycle> &pending_events) {
     int o1 = event.instr.src1, o2 = event.instr.src2, res = event.instr.dst;
-    string op = event.instr.op;
+    Instruction instr = event.instr;
+    string op = instr.op;
     int time = event.curr_time;
     EventType type = event.type;
-    switch (event.type)
+    switch (type)
     {
     case ISSUE:
-        // schedule the event
-        event.issue = time;
-        pipeline_use_after[event.type]=time;
-        
-        event.type = START;
-
+        if (pipeline_use_after[type] <= time) {
+            // schedule the event
+            event.issue = time;
+            pipeline_use_after[type]=time+1;
+            
+            event.type = START;
+        }
+        else {
+            event.curr_time = pipeline_use_after[type];
+        }
         pending_events.push(event);
         break;
     
     case START:
-        if (is_all_resource_available({o1, o2, res}, event.type, time)) {
+        if (is_all_resource_available({o1, o2, res}, type, time, op)) {
             event.start = time;
             int op_latency = functional_units[op].latency;
             int upd_time = time + op_latency;
+            
             // update only result reg, because that is being written
             reg_file[res].free_at = upd_time;
             
             // update the functional units because of singular presence
             functional_units[op].free_at = upd_time;
-            // update the pipeline avail time
-            pipeline_use_after[event.type] = upd_time;
             
+            // update the pipeline avail time
+            pipeline_use_after[type] = upd_time;
+
             // update curr time stamp
             event.curr_time = upd_time;
 
             // compute in between start and complete
-            event.result = compute_result(event.instr);
-            if (event.instr.is_double){
-                reg_file[event.instr.dst].f64 = event.result;
-            }
-            else {
-                reg_file[event.instr.dst].f32 = static_cast<float>(event.result);
-            }
+            event.result = compute_result(instr);
+            reg_file[res].f = event.result;
 
             event.type = COMPLETE;
             event.complete = upd_time - 1;
@@ -377,19 +390,22 @@ void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
             event.type=WRITEBACK;
         }
         else {
-            event.curr_time = next_available_cycle({o1, o2, res}, event.type);
+            event.curr_time = next_available_cycle({o1, o2, res}, type, op);
         }
         pending_events.push(event);
         break;
 
     case WRITEBACK:
-        // dont push back the event after this
-        if (pipeline_use_after[event.type]<=time) {
-            event.writeback = event.curr_time;
+        
+        if (pipeline_use_after[type]<=time) {
+            // dont push back the event after this
+            event.writeback = time;
+            pipeline_use_after[type] = time+1;
+            // event flushed out after writeback
             events_by_index.push(event);
         }
         else {
-            event.curr_time = pipeline_use_after[event.type];
+            event.curr_time = pipeline_use_after[type];
             pending_events.push(event);
         }
         break;
@@ -401,16 +417,10 @@ void process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
 
 bool check_nan(FPRegister reg_file[32]) {
     for (int i=0; i<32; i++){
-        if (reg_file[i].is_64bit) {
-            if (reg_file[i].f64==std::numeric_limits<double>::quiet_NaN()) {
-                return true;
-            }
+        if (reg_file[i].f==std::numeric_limits<double>::quiet_NaN()) {
+            return true;
         }
-        else {
-            if (reg_file[i].f32==std::numeric_limits<float>::quiet_NaN()) {
-                return true;
-            }
-        }
+        
     }
     return false;
 }
@@ -493,7 +503,7 @@ void to_json(Event out, string filename) {
  * @throw unable to open file
  * @warning make sure the last line has backsslash n
  */
-void to_csv(vector<tuple<int,string,int,int,int,int,int>> entries, string filename) {
+void to_csv(vector<tuple<int,string,int,int,int,int,double>> entries, string filename) {
     ofstream outputFile;
     outputFile.open(filename, ios::out);
 
@@ -509,26 +519,31 @@ void to_csv(vector<tuple<int,string,int,int,int,int,int>> entries, string filena
         << get<3>(entry) << ","
         << get<4>(entry) << ","
         << get<5>(entry) << ","
-        << get<6>(entry) << ",";
+        << std::setprecision(6) << get<6>(entry) << "\n";
     }
 
     outputFile.close();
 }
 
-vector<tuple<int,string,int,int,int,int,int>> organize_info(priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index) {
+string gen_instr_string(string op, int res, int o1, int o2) {
+    return op + " " + "R" + to_string(res) + " " + "R" + to_string(o1) + " " + "R" + to_string(o2);
+}
 
-    vector<tuple<int,string,int,int,int,int,int>> res;
+vector<tuple<int,string,int,int,int,int,double>> organize_info(priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index) {
+
+    vector<tuple<int,string,int,int,int,int,double>> res;
     priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index_temp;
     while (!events_by_index.empty()) {
         Event event = events_by_index.top();
         events_by_index.pop();
         
         Instruction instr = event.instr;
-        string risc_op = instr.op + " " + "R" + to_string(instr.src1) + " " + "R" + to_string(instr.src2);
+        string risc_op  = gen_instr_string(instr.op, instr.dst, instr.src1, instr.src2);
         res.push_back(
             {event.index,risc_op,event.issue,event.start,event.complete,event.writeback,event.result}
         );
     }
+    return res;
 }
 
 /**
@@ -559,19 +574,20 @@ int main(int argc, char* argv[]) {
     */
     
     functional_units = {
-        {"FADD.S", FunctionalUnit(false, 0, 3)},
-        {"FADD.D", FunctionalUnit(false, 0, 5)},
-        {"FSUB.S", FunctionalUnit(false, 0, 3)},
-        {"FSUB.D", FunctionalUnit(false, 0, 5)},
-        {"FMUL.S", FunctionalUnit(false, 0, 4)},
-        {"FMUL.D", FunctionalUnit(false, 0, 6)},
-        {"FDIV.S", FunctionalUnit(false, 0, 10)},
-        {"FDIV.D", FunctionalUnit(false, 0, 16)},
+        {"FADD.S", FunctionalUnit(0, 3)},
+        {"FADD.D", FunctionalUnit(0, 5)},
+        {"FSUB.S", FunctionalUnit(0, 3)},
+        {"FSUB.D", FunctionalUnit(0, 5)},
+        {"FMUL.S", FunctionalUnit(0, 4)},
+        {"FMUL.D", FunctionalUnit(0, 6)},
+        {"FDIV.S", FunctionalUnit(0, 10)},
+        {"FDIV.D", FunctionalUnit(0, 16)},
+        {"FMOV.S", FunctionalUnit(0, 1)},
+        {"FMOV.D", FunctionalUnit(0, 1)}
     };
 
     for (int i=0; i<32; i++) {
-        reg_file[i].f32 = 0.0;
-        reg_file[i].f64 = 0.0;
+        reg_file[i].f = 0.0;
         reg_file[i].free_at = 0;
         reg_file[i].is_64bit = false;
     }
@@ -587,7 +603,7 @@ int main(int argc, char* argv[]) {
     
     DESEngine(pending_events);
     // TODO: Write results to output_csv
-    vector<tuple<int,string,int,int,int,int,int>> organized_info =  organize_info(events_by_index);
+    vector<tuple<int,string,int,int,int,int,double>> organized_info =  organize_info(events_by_index);
     to_csv(organized_info, output_csv);
     return 0;
 }
