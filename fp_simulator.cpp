@@ -136,7 +136,6 @@ struct Event {
  * 
  * 1. Current Time of the Event;
  * 2. Arrival Cycle of the Event;
- * 3. Index of the Event (chosen at random as the last resort);
  */
 struct EventCompArrCycle {
     bool operator()(const Event &e1, const Event &e2) {
@@ -163,7 +162,7 @@ struct CompEventByIndex {
     }
 };
 
-
+const int N_REGS=33;
 /**
  * @brief maps ops to their information encapsulated in functional units
  */
@@ -171,7 +170,7 @@ map<string, FunctionalUnit> functional_units;
 /**
  * @brief All 32 register files information encapsulated in FPRegister
  */
-FPRegister reg_file[32];
+FPRegister reg_file[N_REGS];
 /**
  * @brief used for final production of schedule according to index which is very well in acco
  */
@@ -326,6 +325,12 @@ bool is_fu_available(string op, int curr_time) {
 }
 
 bool is_all_resource_available(vector<int> regs, int curr_time, string op) {
+    cout << "the current time is: " << curr_time << endl;
+    cout << regs[0] << " " << regs[1] << " " << regs[2] << endl;
+    for (int i=0; i<3; i++) {
+        cout << reg_file[regs[i]].free_at << " ";
+    }
+    cout << endl;
     if (is_reg_available_list(regs, curr_time) && is_fu_available(op, curr_time)) {
         return true;
     }
@@ -387,6 +392,7 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
     string op = instr.op;
     int time = event.curr_time;
     EventType type = event.type;
+    int op_latency = functional_units[op].latency;
     switch (type)
     {
     case ISSUE:
@@ -404,19 +410,18 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
         break;
     
     case START:
+        
+        
         if (is_all_resource_available({o1, o2, res}, time, op)) {
             event.start = time;
-            int op_latency = functional_units[op].latency;
             int upd_time = time + op_latency;
             
+            cout << "reg_file id " << res << " updated time " << reg_file[res].free_at << endl;
             // update only result reg, because that is being written
             reg_file[res].free_at = upd_time;
             
             // update the functional units because of singular presence
             functional_units[op].free_at = upd_time;
-            
-            // update the pipeline avail time
-            pipeline_use_after[type] = upd_time;
 
             // update curr time stamp
             event.curr_time = upd_time;
@@ -430,31 +435,23 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
             event.complete = upd_time - 1;
 
             event.type=WRITEBACK;
-            
-        }
-        else {
-            event.curr_time = next_available_cycle({o1, o2, res}, op);
-        }
-        pending_events.push(event);
-        break;
+            event.writeback = upd_time;
 
-    case WRITEBACK:
-        
-        if (pipeline_use_after[type]<=time) {
-            // dont push back the event after this
-            event.writeback = time;
-            pipeline_use_after[type] = time+1;
-            // event flushed out after writeback
             events_by_index.push(event);
             if (check_val_nan(event.result)) {
                 return true;
             }
+            
         }
         else {
-            event.curr_time = pipeline_use_after[type];
+            int next_cycle = next_available_cycle({o1, o2, res}, op);
+            event.curr_time = next_cycle;
+            reg_file[res].free_at = next_cycle;
             pending_events.push(event);
         }
+        
         break;
+
     
     default:
         break;
@@ -640,7 +637,7 @@ int main(int argc, char* argv[]) {
         {"FMOV.D", FunctionalUnit(0, 1)}
     };
 
-    for (int i=0; i<32; i++) {
+    for (int i=0; i<N_REGS; i++) {
         reg_file[i].f = 3.146762983;
         reg_file[i].free_at = 0;
         reg_file[i].is_64bit = true;

@@ -23,3 +23,9 @@
 - refractor the code to keep all the data values in fp64 and scale down as per requirement
 - run the code once at least to see some basic results
 - make updates to the fact the index may not correspond to the arrival times
+
+## Day 5
+
+- performed a major correction regarding the cycle of availability of a register, which had not been done correctly before. The issue was we only updated the current time but left the register un attended, for any new instruction that comes it sees the fact that it has its resources available, but actually does not
+- The fact is that current time is not linked to reg_file free time and they can head their independent directions
+- functional unti for both .S and .D are assumed to be the same expect their latencies
