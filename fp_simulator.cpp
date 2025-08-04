@@ -50,16 +50,19 @@ struct FPRegister {
  */
 struct FunctionalUnit {
     int free_at;
-    int latency;
+    int s_latency;
+    int d_latency;
 
     FunctionalUnit() {
         free_at=0;
-        latency=0;
+        s_latency=0;
+        d_latency=0;
     }
 
-    FunctionalUnit(int _free_at, int _latency)  {
+    FunctionalUnit(int _free_at, int _s_latency, int _d_latency)  {
         free_at=_free_at; 
-        latency=_latency;
+        s_latency=_s_latency;
+        d_latency = _d_latency;
     }
 
 };
@@ -187,7 +190,7 @@ map<EventType, int> pipeline_use_after;
  * 
  *  arrival_cycle: (int) cycle of arrival of instr
  * 
- *  op: (string) opcode of the instr
+ *  op: (string) opcode of the instr without 
  * 
  *  is_double: (bool) operations double or single
  * 
@@ -225,13 +228,13 @@ vector<Instruction> parse_input_file(string filename) {
         if (dot_pos >= opcode_full.size()) {
             throw runtime_error("invalid opcode");
         }
-        instr.op = opcode_full;
+        instr.op = opcode_full.substr(0, dot_pos);
         instr.is_double = (opcode_full.substr(dot_pos + 1) == "D");
 
         // Parse registers: strip 'R' and convert to int
         instr.dst = stoi(rd.substr(1));
         instr.src1 = stoi(rs1.substr(1));
-        if (instr.op != "FMOV.S" && instr.op != "FMOV.D") instr.src2 = stoi(rs2.substr(1));
+        if (instr.op != "FMOV") instr.src2 = stoi(rs2.substr(1));
         else instr.src2 = -1;
 
         instructions.push_back(instr);
@@ -325,12 +328,6 @@ bool is_fu_available(string op, int curr_time) {
 }
 
 bool is_all_resource_available(vector<int> regs, int curr_time, string op) {
-    cout << "the current time is: " << curr_time << endl;
-    cout << regs[0] << " " << regs[1] << " " << regs[2] << endl;
-    for (int i=0; i<3; i++) {
-        cout << reg_file[regs[i]].free_at << " ";
-    }
-    cout << endl;
     if (is_reg_available_list(regs, curr_time) && is_fu_available(op, curr_time)) {
         return true;
     }
@@ -366,19 +363,39 @@ double compute_result(Instruction &instr) {
 
     
     
-    if (op == "FADD.S" || op == "FADD.D") {
-        res = val1 + val2;
-    } else if (op == "FSUB.S" || op == "FSUB.D") {
-        res = val1 - val2;
-    } else if (op == "FMUL.S" || op == "FMUL.D") {
-        res = val1 * val2;
-    } else if (op == "FDIV.S" || op == "FDIV.D") {
+    if (op == "FADD") {
+        if (!instr.is_double) {
+            float res_float = (float) val1 + (float) val2;
+            res = (double) res_float;
+        }
+        else res = val1 + val2;
+    } 
+    else if (op == "FSUB") {
+        if (!instr.is_double) {
+            float res_float = (float) val1 - (float) val2;
+            res = (double) res_float;
+        }
+        else res = val1 - val2;
+    } 
+    else if (op == "FMUL") {
+        if (!instr.is_double) {
+            float res_float = val1 * val2;
+            res = (double) res_float;
+        }
+        else res = val1 * val2;
+    }
+    else if (op == "FDIV") {
         if (val2 == 0) {
             res = std::numeric_limits<double>::quiet_NaN(); // NAN if 0/0
         } else {
-            res = val1 / val2;
+            if (!instr.is_double) {
+                float res_float = val1 / val2;
+                res = (double) res_float;
+            }
+            else res = val1 / val2;
         }
-    } else if (op == "FMOV.S" || "FMOV.D") {
+    } 
+    else if (op == "FMOV") {
         res = val1;
     }
 
@@ -392,7 +409,13 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
     string op = instr.op;
     int time = event.curr_time;
     EventType type = event.type;
-    int op_latency = functional_units[op].latency;
+    int op_latency;
+    if (instr.is_double) {
+        op_latency = functional_units[op].d_latency;
+    }
+    else {
+        op_latency = functional_units[op].s_latency;
+    }
     switch (type)
     {
     case ISSUE:
@@ -410,13 +433,10 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
         break;
     
     case START:
-        
-        
         if (is_all_resource_available({o1, o2, res}, time, op)) {
             event.start = time;
             int upd_time = time + op_latency;
             
-            cout << "reg_file id " << res << " updated time " << reg_file[res].free_at << endl;
             // update only result reg, because that is being written
             reg_file[res].free_at = upd_time;
             
@@ -434,13 +454,16 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
             event.type = COMPLETE;
             event.complete = upd_time - 1;
 
+            if (check_val_nan(event.result)) {
+                events_by_index.push(event);
+                return true;
+            }
+
             event.type=WRITEBACK;
             event.writeback = upd_time;
 
             events_by_index.push(event);
-            if (check_val_nan(event.result)) {
-                return true;
-            }
+            
             
         }
         else {
@@ -483,7 +506,7 @@ void DESEngine(priority_queue<Event, vector<Event>, EventCompArrCycle> pending_e
         Event event = pending_events.top();
         pending_events.pop();
         bool enc_nan = process_event(event, pending_events);
-        if (enc_nan) break;
+        if (enc_nan) return;
     }
     return;
 }   
@@ -564,20 +587,23 @@ void to_csv(vector<tuple<int,string,int,int,int,int,double>> entries, string fil
         << get<3>(entry) << ","
         << get<4>(entry) << ","
         << get<5>(entry) << ","
-        << std::setprecision(6) << get<6>(entry) << "\n";
+        << std::fixed << std::setprecision(6) << get<6>(entry) << "\n";
     }
 
     outputFile.close();
 }
 
-string gen_instr_string(string op, int res, int o1, int o2) {
+string gen_instr_string(string op, int res, int o1, int o2, bool is_double) {
     string dst = " R" + to_string(res);
     string op1 = " R" + to_string(o1);
     string op2 = "";
     if (o2 != -1) {
         op2 = " R" + to_string(o2);
     }
-    return op + dst + op1 + op2;
+    string operation = op;
+    if (!is_double) operation += ".S";
+    else operation += ".D";
+    return operation + dst + op1 + op2;
 }
 
 vector<tuple<int,string,int,int,int,int,double>> organize_info(priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index) {
@@ -589,7 +615,7 @@ vector<tuple<int,string,int,int,int,int,double>> organize_info(priority_queue<Ev
         events_by_index.pop();
         
         Instruction instr = event.instr;
-        string risc_op  = gen_instr_string(instr.op, instr.dst, instr.src1, instr.src2);
+        string risc_op  = gen_instr_string(instr.op, instr.dst, instr.src1, instr.src2, instr.is_double);
         res.push_back(
             {event.index,risc_op,event.issue,event.start,event.complete,event.writeback,event.result}
         );
@@ -625,20 +651,15 @@ int main(int argc, char* argv[]) {
     */
     
     functional_units = {
-        {"FADD.S", FunctionalUnit(0, 3)},
-        {"FADD.D", FunctionalUnit(0, 5)},
-        {"FSUB.S", FunctionalUnit(0, 3)},
-        {"FSUB.D", FunctionalUnit(0, 5)},
-        {"FMUL.S", FunctionalUnit(0, 4)},
-        {"FMUL.D", FunctionalUnit(0, 6)},
-        {"FDIV.S", FunctionalUnit(0, 10)},
-        {"FDIV.D", FunctionalUnit(0, 16)},
-        {"FMOV.S", FunctionalUnit(0, 1)},
-        {"FMOV.D", FunctionalUnit(0, 1)}
+        {"FADD", FunctionalUnit(0, 3, 5)},
+        {"FSUB", FunctionalUnit(0, 3, 5)},
+        {"FMUL", FunctionalUnit(0, 4, 6)},
+        {"FDIV", FunctionalUnit(0, 10, 16)},
+        {"FMOV", FunctionalUnit(0, 1, 1)},
     };
 
     for (int i=0; i<N_REGS; i++) {
-        reg_file[i].f = 3.146762983;
+        reg_file[i].f = 0.00000000;
         reg_file[i].free_at = 0;
         reg_file[i].is_64bit = true;
     }
