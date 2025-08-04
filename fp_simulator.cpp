@@ -13,6 +13,7 @@
 #include <limits>
 #include <filesystem>
 #include <cmath>
+#include "json.hpp"
 
 using namespace std;
 
@@ -50,19 +51,16 @@ struct FPRegister {
  */
 struct FunctionalUnit {
     int free_at;
-    int s_latency;
-    int d_latency;
+    int latency;
 
     FunctionalUnit() {
         free_at=0;
-        s_latency=0;
-        d_latency=0;
+        latency=0;
     }
 
-    FunctionalUnit(int _free_at, int _s_latency, int _d_latency)  {
+    FunctionalUnit(int _free_at, int _latency)  {
         free_at=_free_at; 
-        s_latency=_s_latency;
-        d_latency = _d_latency;
+        latency=_latency;
     }
 
 };
@@ -183,6 +181,11 @@ priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index;
  */
 map<EventType, int> pipeline_use_after;
 
+bool is_double(string op) {
+    size_t dot_pos = op.find('.');
+    return (op.substr(dot_pos + 1) == "D");
+}
+
 /**
  * @brief parses input file and converts them Instruction format
  * 
@@ -190,7 +193,7 @@ map<EventType, int> pipeline_use_after;
  * 
  *  arrival_cycle: (int) cycle of arrival of instr
  * 
- *  op: (string) opcode of the instr without 
+ *  op: (string) opcode of the instr
  * 
  *  is_double: (bool) operations double or single
  * 
@@ -204,9 +207,7 @@ map<EventType, int> pipeline_use_after;
  * @throw if any of the conversion to get ints is invalid
  */
 vector<Instruction> parse_input_file(string filename) {
-    if (!filesystem::exists(filename)) {
-        throw runtime_error("input trace does not exits");
-    }
+
     ifstream infile(filename);
     vector<Instruction> instructions;
     string line;
@@ -216,25 +217,20 @@ vector<Instruction> parse_input_file(string filename) {
 
         istringstream iss(line);
         int cycle;
-        string opcode_full, rd, rs1, rs2;
+        string ops, rd, rs1, rs2;
 
-        iss >> cycle >> opcode_full >> rd >> rs1 >> rs2;
+        iss >> cycle >> ops >> rd >> rs1 >> rs2;
 
         Instruction instr;
         instr.arrival_cycle = cycle;
 
-        // Split opcode and precision suffix
-        size_t dot_pos = opcode_full.find('.');
-        if (dot_pos >= opcode_full.size()) {
-            throw runtime_error("invalid opcode");
-        }
-        instr.op = opcode_full.substr(0, dot_pos);
-        instr.is_double = (opcode_full.substr(dot_pos + 1) == "D");
+        instr.op = ops;
+        instr.is_double = is_double(ops);
 
-        // Parse registers: strip 'R' and convert to int
         instr.dst = stoi(rd.substr(1));
         instr.src1 = stoi(rs1.substr(1));
-        if (instr.op != "FMOV") instr.src2 = stoi(rs2.substr(1));
+
+        if (instr.op != "FMOV.S" && instr.op != "FMOV.D") instr.src2 = stoi(rs2.substr(1));
         else instr.src2 = -1;
 
         instructions.push_back(instr);
@@ -363,39 +359,39 @@ double compute_result(Instruction &instr) {
 
     
     
-    if (op == "FADD") {
+    if (op == "FADD.S" || op == "FADD.D") {
         if (!instr.is_double) {
             float res_float = (float) val1 + (float) val2;
             res = (double) res_float;
         }
         else res = val1 + val2;
     } 
-    else if (op == "FSUB") {
+    else if (op == "FSUB.S" || op == "FSUB.D") {
         if (!instr.is_double) {
             float res_float = (float) val1 - (float) val2;
             res = (double) res_float;
         }
         else res = val1 - val2;
     } 
-    else if (op == "FMUL") {
+    else if (op == "FMUL.S" || op == "FMUL.D") {
         if (!instr.is_double) {
-            float res_float = val1 * val2;
+            float res_float = (float) val1 * (float) val2;
             res = (double) res_float;
         }
         else res = val1 * val2;
-    }
-    else if (op == "FDIV") {
+    } 
+    else if (op == "FDIV.S" || op == "FDIV.D") {
         if (val2 == 0) {
             res = std::numeric_limits<double>::quiet_NaN(); // NAN if 0/0
         } else {
             if (!instr.is_double) {
-                float res_float = val1 / val2;
+                float res_float = (float) val1 / (float) val2;
                 res = (double) res_float;
             }
             else res = val1 / val2;
         }
     } 
-    else if (op == "FMOV") {
+    else if (op == "FMOV.S" || "FMOV.D") {
         res = val1;
     }
 
@@ -409,13 +405,7 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
     string op = instr.op;
     int time = event.curr_time;
     EventType type = event.type;
-    int op_latency;
-    if (instr.is_double) {
-        op_latency = functional_units[op].d_latency;
-    }
-    else {
-        op_latency = functional_units[op].s_latency;
-    }
+    int op_latency = functional_units[op].latency;
     switch (type)
     {
     case ISSUE:
@@ -433,6 +423,8 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
         break;
     
     case START:
+        
+        
         if (is_all_resource_available({o1, o2, res}, time, op)) {
             event.start = time;
             int upd_time = time + op_latency;
@@ -453,8 +445,9 @@ bool process_event(Event &event, priority_queue<Event, vector<Event>, EventCompA
 
             event.type = COMPLETE;
             event.complete = upd_time - 1;
-
+            
             if (check_val_nan(event.result)) {
+                event.writeback = -1;
                 events_by_index.push(event);
                 return true;
             }
@@ -506,7 +499,7 @@ void DESEngine(priority_queue<Event, vector<Event>, EventCompArrCycle> pending_e
         Event event = pending_events.top();
         pending_events.pop();
         bool enc_nan = process_event(event, pending_events);
-        if (enc_nan) return;
+        if (enc_nan) break;
     }
     return;
 }   
@@ -519,14 +512,11 @@ void DESEngine(priority_queue<Event, vector<Event>, EventCompArrCycle> pending_e
  * @throw length of bin must be 32, else exit
  */
 float bin32_to_float32(string bin) {
-    if (bin.size()!=32) {
-        throw std::invalid_argument("Binary string must be 32 bits");
-    }
 
     bitset<32> bits(bin);
     uint32_t intval = bits.to_ulong();
     float result;
-    std::memcpy(&result, &intval, sizeof(result));
+    memcpy(&result, &intval, sizeof(result));
 
     return result;
 }
@@ -539,16 +529,18 @@ float bin32_to_float32(string bin) {
  * @throw length of bin must be 64, else exit
  */
 double bin_to_float64(string bin) {
-    
-    if (bin.size() != 64) {
-        throw std::invalid_argument("Binary string must be 64 bits");
-    }
 
-    std::bitset<64> bits(bin);
+    bitset<64> bits(bin);
     uint64_t intVal = bits.to_ullong();
     double result;
     std::memcpy(&result, &intVal, sizeof(result));
     return result;
+}
+
+string get_fu_from_instr(string instr) {
+    size_t firstSpacePos = instr.find(' ');
+    string fu = instr.substr(0, firstSpacePos);
+    return fu;
 }
 
 /**
@@ -559,8 +551,32 @@ double bin_to_float64(string bin) {
  * @return None
  * @throw unable to open files
  */
-void to_json(Event out, string filename) {
+void to_json(vector<tuple<int,string,int,int,int,int,double>> entries, string filename) {
+    nlohmann::json jsonArray = nlohmann::json::array();
+    for (tuple<int,string,int,int,int,int,double> entry:entries) {
+        nlohmann::json data;
+        // index,instr,issue,start,complete,writeback,result
+        data["index"]=get<0>(entry);
+        data["instr"]=get<1>(entry);
+        data["issue"]=get<2>(entry);
+        data["start"]=get<3>(entry);
+        data["complete"]=get<4>(entry);
+        data["writeback"]=get<5>(entry);
+        data["unit"]=get_fu_from_instr(get<1>(entry));
 
+        jsonArray.push_back(data);
+    }
+
+    string jsonString = jsonArray.dump(4);
+
+    string save_loc = filename+"_timeline.json";
+    ofstream outputFile(save_loc);
+    if (outputFile.is_open()) {
+        outputFile << jsonString;
+        outputFile.close();
+    }
+
+    return;
 }
 
 /**
@@ -572,8 +588,9 @@ void to_json(Event out, string filename) {
  * @warning make sure the last line has backsslash n
  */
 void to_csv(vector<tuple<int,string,int,int,int,int,double>> entries, string filename) {
+    string save_loc = filename+".csv";
     ofstream outputFile;
-    outputFile.open(filename, ios::out);
+    outputFile.open(save_loc, ios::out);
 
     if (!outputFile.is_open()) {
         cerr << "Error opening the file" << endl;
@@ -593,17 +610,14 @@ void to_csv(vector<tuple<int,string,int,int,int,int,double>> entries, string fil
     outputFile.close();
 }
 
-string gen_instr_string(string op, int res, int o1, int o2, bool is_double) {
+string gen_instr_string(string op, int res, int o1, int o2) {
     string dst = " R" + to_string(res);
     string op1 = " R" + to_string(o1);
     string op2 = "";
     if (o2 != -1) {
         op2 = " R" + to_string(o2);
     }
-    string operation = op;
-    if (!is_double) operation += ".S";
-    else operation += ".D";
-    return operation + dst + op1 + op2;
+    return op + dst + op1 + op2;
 }
 
 vector<tuple<int,string,int,int,int,int,double>> organize_info(priority_queue<Event, vector<Event>, CompEventByIndex> events_by_index) {
@@ -615,7 +629,7 @@ vector<tuple<int,string,int,int,int,int,double>> organize_info(priority_queue<Ev
         events_by_index.pop();
         
         Instruction instr = event.instr;
-        string risc_op  = gen_instr_string(instr.op, instr.dst, instr.src1, instr.src2, instr.is_double);
+        string risc_op  = gen_instr_string(instr.op, instr.dst, instr.src1, instr.src2);
         res.push_back(
             {event.index,risc_op,event.issue,event.start,event.complete,event.writeback,event.result}
         );
@@ -651,15 +665,20 @@ int main(int argc, char* argv[]) {
     */
     
     functional_units = {
-        {"FADD", FunctionalUnit(0, 3, 5)},
-        {"FSUB", FunctionalUnit(0, 3, 5)},
-        {"FMUL", FunctionalUnit(0, 4, 6)},
-        {"FDIV", FunctionalUnit(0, 10, 16)},
-        {"FMOV", FunctionalUnit(0, 1, 1)},
+        {"FADD.S", FunctionalUnit(0, 3)},
+        {"FADD.D", FunctionalUnit(0, 5)},
+        {"FSUB.S", FunctionalUnit(0, 3)},
+        {"FSUB.D", FunctionalUnit(0, 5)},
+        {"FMUL.S", FunctionalUnit(0, 4)},
+        {"FMUL.D", FunctionalUnit(0, 6)},
+        {"FDIV.S", FunctionalUnit(0, 10)},
+        {"FDIV.D", FunctionalUnit(0, 16)},
+        {"FMOV.S", FunctionalUnit(0, 1)},
+        {"FMOV.D", FunctionalUnit(0, 1)}
     };
 
     for (int i=0; i<N_REGS; i++) {
-        reg_file[i].f = 0.00000000;
+        reg_file[i].f = 0.000;
         reg_file[i].free_at = 0;
         reg_file[i].is_64bit = true;
     }
@@ -680,5 +699,6 @@ int main(int argc, char* argv[]) {
     // TODO: Write results to output_csv
     vector<tuple<int,string,int,int,int,int,double>> organized_info =  organize_info(events_by_index);
     to_csv(organized_info, output_csv);
+    to_json(organized_info, output_csv);
     return 0;
 }

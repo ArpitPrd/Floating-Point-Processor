@@ -1,3 +1,10 @@
+## Brief of the Assignment
+
+- This is a Discrete Event Simulator based model that emulates instruction based on a floating point processor.
+- On a high level the algorithm to perform this is split into two parts:
+    - A DES Engine: takes input for the queue of events to be scheduled
+    - Process Handler: handles the entry and execution of an event in the pipeline
+
 ## Instructions to Run this code
 
 1. Open terminal in the folder where fp_simulator.cpp is placed
@@ -18,7 +25,7 @@
 
 1. **Assumptions on Hardware**:
     - **Functional Unit**:
-        - a .S and .D opcode differ only in terms of latency but are operated on the same device
+        - a .S and .D opcode differ both in terms of latency and precision
         - The program lets avail a functional unit when the previous instruction (which was using this functinal block) has started its writeback
         - All operations operate on IEEE 754
     - **Register File**:
@@ -52,8 +59,18 @@
 
 6. **RESULT**
     - All the computations are performed in fp64 and scaled down to fp 32 whenever required
-    - This will not handle the case of overflow for fp32 but handles for fp64
-    
+    - All the register values are initially assumed to be zero and remain zero until a division is encountered
+    - If an exception is encountered during the execute stage, the event of this instrcution is recorded upto the complete, after which it writeback is assigned as -1
+    - since the events are executed out of order, events that get completed before the exception instrcuction even though whose arrival cycle is greater than the instruction in consideration get listed in output.csv
+    - These instrcution mainly include the ones that do not use the resources pre-occupied pre-exception and latency of completion is lesser
+
+## Visualization
+
+[Gantt Chart](plot.png)
+
+Note:
+- for MOV operations start and complete are the same by the assumptions mentioned above, therefore no block from start to complete
+
 ## Warnings
 
 1. Mixed precision operations not supported

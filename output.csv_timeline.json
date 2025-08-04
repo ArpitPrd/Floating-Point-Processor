@@ -1,0 +1,65 @@
+[
+    {
+        "complete": 2,
+        "index": 0,
+        "instr": "FADD.S R1 R2 R3",
+        "issue": 0,
+        "start": 0,
+        "unit": "FADD.S",
+        "writeback": 3
+    },
+    {
+        "complete": 6,
+        "index": 1,
+        "instr": "FMUL.S R4 R1 R5",
+        "issue": 1,
+        "start": 3,
+        "unit": "FMUL.S",
+        "writeback": 7
+    },
+    {
+        "complete": 9,
+        "index": 2,
+        "instr": "FSUB.S R6 R4 R7",
+        "issue": 2,
+        "start": 7,
+        "unit": "FSUB.S",
+        "writeback": 10
+    },
+    {
+        "complete": 19,
+        "index": 3,
+        "instr": "FDIV.S R8 R6 R9",
+        "issue": 3,
+        "start": 10,
+        "unit": "FDIV.S",
+        "writeback": -1
+    },
+    {
+        "complete": 8,
+        "index": 4,
+        "instr": "FADD.D R10 R2 R3",
+        "issue": 4,
+        "start": 4,
+        "unit": "FADD.D",
+        "writeback": 9
+    },
+    {
+        "complete": 9,
+        "index": 5,
+        "instr": "FMOV.S R11 R10",
+        "issue": 5,
+        "start": 9,
+        "unit": "FMOV.S",
+        "writeback": 10
+    },
+    {
+        "complete": 11,
+        "index": 6,
+        "instr": "FMUL.D R12 R1 R13",
+        "issue": 6,
+        "start": 6,
+        "unit": "FMUL.D",
+        "writeback": 12
+    }
+]

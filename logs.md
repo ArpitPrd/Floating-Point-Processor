@@ -29,3 +29,14 @@
 - performed a major correction regarding the cycle of availability of a register, which had not been done correctly before. The issue was we only updated the current time but left the register un attended, for any new instruction that comes it sees the fact that it has its resources available, but actually does not
 - The fact is that current time is not linked to reg_file free time and they can head their independent directions
 - functional unti for both .S and .D are assumed to be the same expect their latencies
+- the code must immedeatily stop when nan is encountered
+- write the description of what the code actually is in README.md
+
+## Day 6
+
+- Provide a header to the README.md describing the repo
+- check the requirements of the pdf
+- upload on moodle
+- make a version where only single unit supports one unit operations
+- also run with the expected description
+- support float overflow in single unit version
