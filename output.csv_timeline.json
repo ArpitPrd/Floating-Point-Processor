@@ -33,7 +33,7 @@
         "issue": 3,
         "start": 10,
         "unit": "FDIV.S",
-        "writeback": -1
+        "writeback": 20
     },
     {
         "complete": 8,
@@ -61,5 +61,23 @@
         "start": 6,
         "unit": "FMUL.D",
         "writeback": 12
+    },
+    {
+        "complete": 12,
+        "index": 7,
+        "instr": "FMOV.D R14 R12",
+        "issue": 7,
+        "start": 12,
+        "unit": "FMOV.D",
+        "writeback": 13
+    },
+    {
+        "complete": 17,
+        "index": 8,
+        "instr": "FSUB.D R15 R14 R5",
+        "issue": 8,
+        "start": 13,
+        "unit": "FSUB.D",
+        "writeback": 18
     }
 ]

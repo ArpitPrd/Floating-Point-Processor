@@ -1,6 +1,7 @@
 import csv
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+import argparse
 
 def get_event_from_csv(filename:str) -> list[tuple]:
     instrs = []
@@ -25,6 +26,29 @@ def get_event_from_csv(filename:str) -> list[tuple]:
 
     return instrs
 
+def make_broken_barh(ax, inst, y, stage_height, colors):
+    ax.broken_barh([(inst["issue"], 1)], (y, stage_height), facecolors=colors["issue"])
+
+    duration = inst["complete"] - inst["start"] + 1
+
+    ax.broken_barh([(inst["start"], duration)], (y, stage_height), facecolors=colors["start"])
+
+
+    ax.broken_barh([(inst["complete"], 1)], (y, stage_height), facecolors=colors["complete"])
+
+
+    ax.broken_barh([(inst["writeback"], 1)], (y, stage_height), facecolors=colors["writeback"])
+
+    ax.text(-1, y + stage_height / 2, f'{inst["index"]}: {inst["instr"]}', va='center', ha='right')
+
+def set_legends(colors):
+    return [
+        Patch(color=colors["issue"], label="issue"),
+        Patch(color=colors["start"], label="start"),
+        Patch(color=colors["complete"], label="complete"),
+        Patch(color=colors["writeback"], label="writeback"),
+    ]
+
 def plot_gantt(instrs:list[tuple], filename:str) -> None:
 
     _, ax = plt.subplots()
@@ -42,32 +66,15 @@ def plot_gantt(instrs:list[tuple], filename:str) -> None:
         y = i * (stage_height + gap)
 
 
-        ax.broken_barh([(inst["issue"], 1)], (y, stage_height), facecolors=colors["issue"])
-
-
-        duration = inst["complete"] - inst["start"] + 1
-        if duration >= 0:
-            ax.broken_barh([(inst["start"], duration)], (y, stage_height), facecolors=colors["start"])
-
-
-        ax.broken_barh([(inst["complete"], 1)], (y, stage_height), facecolors=colors["complete"])
-
-
-        ax.broken_barh([(inst["writeback"], 1)], (y, stage_height), facecolors=colors["writeback"])
-
-        ax.text(-1, y + stage_height / 2, f'{inst["index"]}: {inst["instr"]}', va='center', ha='right')
+        make_broken_barh(ax, inst, y, stage_height, colors)
 
     ax.set_xlabel("Clock Cycles")
     ax.set_yticks([])
     ax.set_title("Floating-Point Pipeline Timeline")
     ax.grid(True)
     
-    legend_handles = [
-        Patch(color=colors["issue"], label="issue"),
-        Patch(color=colors["start"], label="start"),
-        Patch(color=colors["complete"], label="complete"),
-        Patch(color=colors["writeback"], label="writeback"),
-    ]
+    legend_handles = set_legends(colors)
+    
     ax.legend(handles=legend_handles, loc="upper left")
 
     plt.tight_layout()
@@ -79,6 +86,11 @@ def plot_gantt(instrs:list[tuple], filename:str) -> None:
     return
 
 if __name__ == "__main__":
-
-    instr = get_event_from_csv("output.csv")
-    plot_gantt(instr, "plot.png")
+    parser = argparse.ArgumentParser(description="Scheduling Visuals")
+    parser.add_argument("--csv", type=str, help="provide csv file to ouput containing details of all the events")
+    parser.add_argument("--plot_save_loc", type=str, help="path to save the plot gantt chart")
+    args = parser.parse_args()
+    csv_file = args.csv
+    plot_save_loc = args.plot_save_loc
+    instr = get_event_from_csv(csv_file)
+    plot_gantt(instr, plot_save_loc)

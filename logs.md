@@ -40,3 +40,12 @@
 - make a version where only single unit supports one unit operations
 - also run with the expected description
 - support float overflow in single unit version
+
+## Day 7
+
+- Some of the code was written using LLMs, must be understood, especially the simulation part
+- memcpy is a new technique learnt
+
+## Future
+
+- Build next projects with gem5 simulator

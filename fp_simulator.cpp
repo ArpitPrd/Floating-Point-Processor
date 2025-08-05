@@ -678,7 +678,7 @@ int main(int argc, char* argv[]) {
     };
 
     for (int i=0; i<N_REGS; i++) {
-        reg_file[i].f = 0.000;
+        reg_file[i].f = 0.0000;
         reg_file[i].free_at = 0;
         reg_file[i].is_64bit = true;
     }

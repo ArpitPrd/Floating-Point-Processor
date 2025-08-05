@@ -70,6 +70,32 @@
 
 Note:
 - for MOV operations start and complete are the same by the assumptions mentioned above, therefore no block from start to complete
+- produced for input trace 
+    ```
+    0 FADD.S R1 R2 R3
+    1 FMUL.S R4 R1 R5
+    2 FSUB.S R6 R4 R7
+    3 FDIV.S R8 R6 R9
+    4 FADD.D R10 R2 R3
+    5 FMOV.S R11 R10
+    6 FMUL.D R12 R1 R13
+    7 FMOV.D R14 R12
+    8 FSUB.D R15 R14 R5
+
+    ```
+- regsiters have initial value = 3.14889877634
+## Instruction to run code for Gantt Chart
+
+```
+python3 sim_visuals.py --csv <csv file> --plot_save_loc <plot save location>
+```
+
+## Requirements to run this code:
+
+- cpp code:
+    - working directory has json header ([nlohmann/json github](https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp)) "json.hpp"
+- Python Code:
+    - matplotlib >=3.10
 
 ## Warnings
 
